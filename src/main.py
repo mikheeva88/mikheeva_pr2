@@ -1,11 +1,15 @@
-"""Инструмент визуализации графа зависимостей. Этап 1: конфигурация."""
+"""Инструмент визуализации графа зависимостей npm-пакетов."""
 
 import csv
+import json
 import os
 import sys
+import urllib.error
+import urllib.request
 
 DEFAULT_CONFIG = "config.csv"
 MIN_DEPTH = 1
+TIMEOUT = 10
 CSV_HEADER = ["key", "value"]
 REQUIRED_KEYS = [
     "package_name",
@@ -20,17 +24,24 @@ class ConfigError(Exception):
     """Ошибка в конфигурационном файле."""
 
 
+class RepositoryError(Exception):
+    """Ошибка получения данных из репозитория пакетов."""
+
+
 def read_csv(path):
     """Прочитать CSV-файл и вернуть словарь «параметр -> значение»."""
     if not os.path.isfile(path):
         raise ConfigError(f"файл конфигурации не найден: {path}")
     data = {}
-    with open(path, encoding="utf-8", newline="") as file:
-        reader = csv.DictReader(file)
-        if reader.fieldnames != CSV_HEADER:
-            raise ConfigError("первая строка файла должна быть: key,value")
-        for row in reader:
-            data[row["key"].strip()] = (row["value"] or "").strip()
+    try:
+        with open(path, encoding="utf-8", newline="") as file:
+            reader = csv.DictReader(file)
+            if reader.fieldnames != CSV_HEADER:
+                raise ConfigError("первая строка должна быть: key,value")
+            for row in reader:
+                data[row["key"].strip()] = (row["value"] or "").strip()
+    except UnicodeDecodeError:
+        raise ConfigError("файл должен быть сохранён в кодировке UTF-8")
     return data
 
 
@@ -84,17 +95,56 @@ def load_config(path):
     }
 
 
+def fetch_package(repo_url, package_name):
+    """Скачать описание последней версии пакета из npm-репозитория."""
+    url = f"{repo_url.rstrip('/')}/{package_name}/latest"
+    try:
+        with urllib.request.urlopen(url, timeout=TIMEOUT) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        raise RepositoryError(
+            f"пакет {package_name} не найден (код ответа {error.code})"
+        )
+    except urllib.error.URLError as error:
+        raise RepositoryError(f"нет связи с репозиторием: {error.reason}")
+    except ValueError:
+        raise RepositoryError("репозиторий вернул данные не в формате JSON")
+
+
+def get_direct_dependencies(repo_url, package_name):
+    """Вернуть словарь прямых зависимостей пакета «имя -> версия»."""
+    package = fetch_package(repo_url, package_name)
+    return package.get("dependencies", {})
+
+
+def print_dependencies(package_name, dependencies):
+    """Вывести на экран прямые зависимости пакета."""
+    if not dependencies:
+        print(f"У пакета {package_name} нет прямых зависимостей")
+        return
+    print(f"Прямые зависимости пакета {package_name}:")
+    for name, version in dependencies.items():
+        print(f"  {name} {version}")
+
+
 def main():
-    """Точка входа: загрузить конфигурацию и вывести параметры."""
+    """Точка входа: загрузить конфигурацию и вывести прямые зависимости."""
     args = sys.argv[1:]
     path = args[0] if args else DEFAULT_CONFIG
     try:
         config = load_config(path)
+        if config["test_mode"]:
+            raise ConfigError("тестовый режим будет реализован на этапе 3")
+        dependencies = get_direct_dependencies(
+            config["repo_url"], config["package_name"]
+        )
     except ConfigError as error:
         print(f"Ошибка конфигурации: {error}")
         return 1
-    for key, value in config.items():
-        print(f"{key} = {value}")
+    except RepositoryError as error:
+        print(f"Ошибка репозитория: {error}")
+        return 1
+    print_dependencies(config["package_name"], dependencies)
     return 0
 
 

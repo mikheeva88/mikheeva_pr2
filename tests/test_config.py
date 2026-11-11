@@ -8,7 +8,7 @@ from src.main import ConfigError, load_config
 
 GOOD_CONFIG = {
     "package_name": "express",
-    "repo_url": "https://registry.npmjs.org/express",
+    "repo_url": "https://registry.npmjs.org",
     "test_mode": "false",
     "ascii_tree": "true",
     "max_depth": "3",
@@ -50,6 +50,15 @@ class TestConfig(unittest.TestCase):
         """Нет файла конфигурации."""
         with self.assertRaises(ConfigError):
             load_config("no_such_file.csv")
+
+    def test_wrong_encoding(self):
+        """Файл сохранён не в UTF-8 (например, Блокнотом в Windows-1251)."""
+        path = write_config(dict(GOOD_CONFIG))
+        with open(path, "a", encoding="cp1251") as file:
+            file.write("comment,да\n")
+        with self.assertRaises(ConfigError):
+            load_config(path)
+        os.remove(path)
 
     def test_missing_param(self):
         """Не задан обязательный параметр."""
