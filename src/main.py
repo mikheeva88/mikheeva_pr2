@@ -117,26 +117,71 @@ def get_direct_dependencies(repo_url, package_name):
     return package.get("dependencies", {})
 
 
-def print_dependencies(package_name, dependencies):
-    """Вывести на экран прямые зависимости пакета."""
-    if not dependencies:
-        print(f"У пакета {package_name} нет прямых зависимостей")
+def load_test_repo(path):
+    """Прочитать файл тестового репозитория (строки вида «A: B C»)."""
+    repo = {}
+    with open(path, encoding="utf-8") as file:
+        for line in file:
+            if not line.strip():
+                continue
+            if ":" not in line:
+                raise RepositoryError(f"неверная строка в {path}: {line}")
+            name, _, dependencies = line.partition(":")
+            repo[name.strip()] = dependencies.split()
+    return repo
+
+
+def make_dependency_getter(config):
+    """Вернуть функцию, которая по имени пакета выдаёт его зависимости."""
+    package_name = config["package_name"]
+    repo_url = config["repo_url"]
+    if not config["test_mode"]:
+        return lambda name: list(get_direct_dependencies(repo_url, name))
+    repo = load_test_repo(repo_url)
+    if package_name not in repo:
+        raise RepositoryError(
+            f"пакет {package_name} не найден в тестовом репозитории"
+        )
+    return lambda name: repo.get(name, [])
+
+
+def bfs_level(level, depth, graph, get_dependencies, max_depth):
+    """Обработать один уровень BFS и рекурсивно перейти к следующему."""
+    if not level or depth >= max_depth:
         return
-    print(f"Прямые зависимости пакета {package_name}:")
-    for name, version in dependencies.items():
-        print(f"  {name} {version}")
+    for package in level:
+        graph[package] = get_dependencies(package)
+    next_level = []
+    for package in level:
+        for dependency in graph[package]:
+            if dependency not in graph and dependency not in next_level:
+                next_level.append(dependency)
+    bfs_level(next_level, depth + 1, graph, get_dependencies, max_depth)
+
+
+def build_graph(package_name, get_dependencies, max_depth):
+    """Построить граф зависимостей «пакет -> список зависимостей»."""
+    graph = {}
+    bfs_level([package_name], 0, graph, get_dependencies, max_depth)
+    return graph
+
+
+def print_graph(graph):
+    """Вывести граф: для каждого пакета — список его зависимостей."""
+    print("Граф зависимостей:")
+    for package, dependencies in graph.items():
+        print(f"  {package} -> {', '.join(dependencies) or '-'}")
 
 
 def main():
-    """Точка входа: загрузить конфигурацию и вывести прямые зависимости."""
+    """Точка входа: загрузить конфигурацию и вывести граф зависимостей."""
     args = sys.argv[1:]
     path = args[0] if args else DEFAULT_CONFIG
     try:
         config = load_config(path)
-        if config["test_mode"]:
-            raise ConfigError("тестовый режим будет реализован на этапе 3")
-        dependencies = get_direct_dependencies(
-            config["repo_url"], config["package_name"]
+        get_dependencies = make_dependency_getter(config)
+        graph = build_graph(
+            config["package_name"], get_dependencies, config["max_depth"]
         )
     except ConfigError as error:
         print(f"Ошибка конфигурации: {error}")
@@ -144,7 +189,7 @@ def main():
     except RepositoryError as error:
         print(f"Ошибка репозитория: {error}")
         return 1
-    print_dependencies(config["package_name"], dependencies)
+    print_graph(graph)
     return 0
 
 

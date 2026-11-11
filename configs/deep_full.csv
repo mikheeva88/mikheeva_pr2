@@ -1,0 +1,6 @@
+key,value
+package_name,A
+repo_url,tests/repos/deep.txt
+test_mode,true
+ascii_tree,false
+max_depth,10
