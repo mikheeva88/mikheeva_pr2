@@ -1,0 +1,6 @@
+key,value
+package_name,express
+repo_url,https://registry.npmjs.org/express
+test_mode,false
+ascii_tree,false
+max_depth,3
